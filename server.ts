@@ -200,6 +200,52 @@ async function startServer() {
     console.error('Database initialization background error:', err);
   });
 
+  // Enforce authentication and session validation on all protected API routes
+  app.use('/api/*', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    // Exempt public endpoints from mandatory auth header checks
+    const publicPaths = [
+      '/api/health',
+      '/api/db/status',
+      '/api/db/reconnect',
+      '/api/auth/providers',
+      '/api/auth/login',
+      '/api/auth/register',
+    ];
+
+    const isPublic = publicPaths.some((p) => req.baseUrl.startsWith(p) || req.originalUrl.startsWith(p) || req.path === p);
+    if (isPublic) {
+      return next();
+    }
+
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({
+          error: 'غير مصرح لك بالوصول إلى البيانات. يرجى تسجيل الدخول أولاً.',
+          code: 'UNAUTHORIZED'
+        });
+      }
+
+      const token = authHeader.replace('Bearer ', '').trim();
+      const sessionResult = await validateAuthSessionFromDb(token);
+      if (!sessionResult.valid || !sessionResult.user) {
+        return res.status(401).json({
+          error: 'جلسة العمل غير صالحة أو منتهية الصلاحية. يرجى إعادة تسجيل الدخول.',
+          code: 'INVALID_SESSION'
+        });
+      }
+
+      // Inject validated user profile and workspace contextual metadata directly into the request object
+      (req as any).user = sessionResult.user;
+      (req as any).workspaceId = sessionResult.workspaceId;
+      
+      next();
+    } catch (e: any) {
+      console.error('API Authentication Middleware Error:', e);
+      res.status(500).json({ error: 'حدث خطأ أثناء فحص الهوية الأمنية', details: e.message });
+    }
+  });
+
   // Helper for lazy Gemini AI instance initialization
   function getGenAI() {
     const apiKey = process.env.GEMINI_API_KEY;

@@ -96,8 +96,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (storedToken) {
       validateSession(storedToken);
     } else {
-      // If no token, auto-login with default root administrator from seeded local DB for smooth onboarding
-      handleAutoLoginDefaultAdmin();
+      setIsLoading(false);
     }
   }, [fetchProviders, validateSession]);
 

@@ -36,8 +36,8 @@ let dbInfo = {
 
 export function getDatabaseUrl(): string | undefined {
   return (
-    process.env.DATABASE_URL ||
     process.env.POSTGRES_URL ||
+    process.env.DATABASE_URL ||
     process.env.PG_URI ||
     process.env.DATABASE_URI ||
     process.env.POSTGRESQL_URL ||
@@ -60,7 +60,7 @@ export async function initializeDatabase(): Promise<boolean> {
   const connectionString = getDatabaseUrl();
 
   if (!connectionString) {
-    console.log('ℹ️ [Database] No DATABASE_URL found in environment. Using in-memory store with full RLS simulation.');
+    console.log('ℹ️ [Database] No POSTGRES_URL or DATABASE_URL found in environment. Using in-memory store with full RLS simulation.');
     isPgConnected = false;
     return false;
   }
