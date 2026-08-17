@@ -60,6 +60,15 @@ import { DEFAULT_MARKETPLACE_CATALOG } from './src/data/marketplaceData.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Global Exception/Rejection Handlers to prevent server crashes in production
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err, origin) => {
+  console.error('⚠️ Uncaught Exception thrown:', err, 'at:', origin);
+});
+
 function normalizeArabic(text: string): string {
   if (!text) return '';
   return text
