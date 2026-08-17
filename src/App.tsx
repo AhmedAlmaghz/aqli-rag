@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { Analytics } from '@vercel/analytics/react';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { HomePage } from './views/HomePage';
@@ -187,6 +188,9 @@ export default function App() {
 
           {/* Global Footer */}
           <Footer lang={lang} />
+
+          {/* Vercel Web Analytics */}
+          <Analytics />
 
         </div>
       </AuthProvider>
