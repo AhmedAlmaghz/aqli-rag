@@ -212,7 +212,13 @@ async function startServer() {
       '/api/auth/register',
     ];
 
-    const isPublic = publicPaths.some((p) => req.baseUrl.startsWith(p) || req.originalUrl.startsWith(p) || req.path === p);
+    const urlPath = (req.originalUrl || req.url || '').split('?')[0];
+    const isPublic = publicPaths.some((p) => {
+      const normalizedPath = urlPath.replace(/\/+$/, '');
+      const normalizedP = p.replace(/\/+$/, '');
+      return normalizedPath === normalizedP || normalizedPath.startsWith(normalizedP + '/');
+    });
+
     if (isPublic) {
       return next();
     }

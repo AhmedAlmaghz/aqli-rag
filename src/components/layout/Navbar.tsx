@@ -56,15 +56,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch('/api/workspaces')
-      .then(res => res.json())
-      .then(data => {
-        if (Array.isArray(data) && data.length > 0) {
-          setWorkspaces(data);
-        }
-      })
-      .catch(err => console.error('Failed to load workspaces:', err));
-  }, []);
+    if (isAuthenticated) {
+      fetch('/api/workspaces')
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data) && data.length > 0) {
+            setWorkspaces(data);
+          }
+        })
+        .catch(err => console.error('Failed to load workspaces:', err));
+    }
+  }, [isAuthenticated]);
 
   useEffect(() => {
     fetch('/api/health')

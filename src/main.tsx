@@ -60,8 +60,18 @@ try {
 // Polyfill Response.prototype.json to handle invalid server responses gracefully
 const originalJson = Response.prototype.json;
 Response.prototype.json = function() {
-  return originalJson.apply(this, arguments as any).catch(err => {
+  if (this.status === 204 || this.status === 205) {
+    return Promise.resolve({});
+  }
+  return originalJson.apply(this, arguments as any).catch(async (err) => {
     console.error("⚠️ Intercepted invalid JSON response from server:", err);
+    try {
+      const text = await this.clone().text();
+      if (!text || text.trim() === "") {
+        return {};
+      }
+    } catch (_) {}
+
     // Return a hybrid array/object fallback to prevent downstream map or object destructuring crashes
     const fallback: any = [];
     fallback.error = "فشلت قراءة استجابة الخادم كـ JSON. قد يكون هناك خلل مؤقت في الاتصال.";
