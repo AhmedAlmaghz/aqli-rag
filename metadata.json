@@ -1,0 +1,10 @@
+{
+  "name": "AQLI RAG",
+  "description": "منصة Aqli RAG — نظام استرجاع وتوليد هجين ثنائي اللغة (عربي/إنجليزي) بمعمارية Multi-Tenant وSaaS-Ready وفق معايير SDLC",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
