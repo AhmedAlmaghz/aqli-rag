@@ -57,28 +57,26 @@ try {
   console.warn("⚠️ Could not override window.fetch directly due to sandbox limits. Standard API requests remain active:", e);
 }
 
-// Polyfill Response.prototype.json to handle invalid server responses gracefully
+// Polyfill Response.prototype.json to handle empty or invalid server responses gracefully
 const originalJson = Response.prototype.json;
 Response.prototype.json = function() {
   if (this.status === 204 || this.status === 205) {
     return Promise.resolve({});
   }
   return originalJson.apply(this, arguments as any).catch(async (err) => {
-    console.error("⚠️ Intercepted invalid JSON response from server:", err);
-    try {
-      const text = await this.clone().text();
-      if (!text || text.trim() === "") {
-        return {};
-      }
-    } catch (_) {}
+    console.warn("⚠️ Handled non-JSON response from server safely:", err?.message);
+    // If response succeeded (status 200-299), return empty object without error flags
+    if (this.ok) {
+      return {};
+    }
 
-    // Return a hybrid array/object fallback to prevent downstream map or object destructuring crashes
-    const fallback: any = [];
-    fallback.error = "فشلت قراءة استجابة الخادم كـ JSON. قد يكون هناك خلل مؤقت في الاتصال.";
-    fallback.errorEn = "Failed to parse server response as JSON. There may be a temporary connection issue.";
-    fallback.details = err.message;
-    fallback.isValidationError = true;
-    return fallback;
+    // For error status codes (e.g. 502, 503, 404 HTML pages), return structured error object
+    return {
+      error: `خطأ في الاتصال بالخادم (رمز الاستجابة: ${this.status})`,
+      errorEn: `Server connection error (HTTP ${this.status})`,
+      status: this.status,
+      isNetworkError: true,
+    };
   });
 };
 

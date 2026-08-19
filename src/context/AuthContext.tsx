@@ -25,6 +25,29 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const TOKEN_STORAGE_KEY = 'aqli_auth_token_v1';
 const USER_STORAGE_KEY = 'aqli_auth_user_v1';
 
+// Helper function to safely parse API responses even if the server returns non-JSON or HTML
+async function safeParseAuthResponse(res: Response): Promise<{ data: any; isJson: boolean; rawText?: string }> {
+  if (res.status === 204 || res.status === 205) {
+    return { data: {}, isJson: true };
+  }
+
+  try {
+    const rawText = await res.text();
+    if (!rawText || rawText.trim() === '') {
+      return { data: {}, isJson: true, rawText: '' };
+    }
+
+    try {
+      const data = JSON.parse(rawText);
+      return { data, isJson: true, rawText };
+    } catch {
+      return { data: null, isJson: false, rawText };
+    }
+  } catch (err: any) {
+    return { data: null, isJson: false, rawText: err?.message };
+  }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(() => {
     try {
@@ -49,8 +72,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const fetchProviders = useCallback(async () => {
     try {
       const res = await fetch('/api/auth/providers');
-      if (res.ok) {
-        const data = await res.json();
+      const { data, isJson } = await safeParseAuthResponse(res);
+      if (res.ok && isJson && data) {
         setProviders(data.providers || []);
         setActiveProvider(data.defaultProvider || 'database');
       }
@@ -68,15 +91,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user) {
-          setUser(data.user);
-          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(data.user));
-          return true;
-        }
+      const { data, isJson } = await safeParseAuthResponse(res);
+      if (res.ok && isJson && data?.user) {
+        setUser(data.user);
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(data.user));
+        return true;
       }
-      // If invalid token, clear
+      // If invalid token or server rejected, clear
       setToken(null);
       setUser(null);
       localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -111,14 +132,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           workspaceId: 'ws-enterprise-legal',
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.token && data.user) {
-          setToken(data.token);
-          setUser(data.user);
-          localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
-          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(data.user));
-        }
+      const { data, isJson } = await safeParseAuthResponse(res);
+      if (res.ok && isJson && data?.token && data?.user) {
+        setToken(data.token);
+        setUser(data.user);
+        localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(data.user));
       }
     } catch (e) {
       console.warn('Default admin auto-login:', e);
@@ -136,10 +155,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ email, password, workspaceId }),
       });
 
-      const data = await res.json();
+      const { data, isJson, rawText } = await safeParseAuthResponse(res);
+
       if (!res.ok) {
         setIsLoading(false);
-        return { success: false, error: data.error || 'فشل تسجيل الدخول' };
+        if (isJson && data?.error) {
+          return { success: false, error: data.error };
+        }
+
+        if (res.status === 401) {
+          return { 
+            success: false, 
+            error: 'بيانات الاعتماد غير صحيحة. يرجى التحقق من البريد الإلكتروني وكلمة المرور.' 
+          };
+        }
+        if (res.status === 403) {
+          return { 
+            success: false, 
+            error: 'تم تقييد الوصول لهذا الحساب في مساحة العمل المحددة.' 
+          };
+        }
+        if (res.status === 404) {
+          return { 
+            success: false, 
+            error: 'خدمة تسجيل الدخول غير متاحة حالياً (رمز 404).' 
+          };
+        }
+        if (res.status >= 500) {
+          return { 
+            success: false, 
+            error: `استجاب خادم المصادقة برمز خطأ (${res.status}). يرجى إعادة المحاولة بعد لحظات.` 
+          };
+        }
+
+        return { 
+          success: false, 
+          error: `تعذر تسجيل الدخول (رمز الاستجابة: ${res.status}).` 
+        };
+      }
+
+      if (!isJson || !data) {
+        setIsLoading(false);
+        return {
+          success: false,
+          error: 'استلم التطبيق استجابة غير مهيكلة من الخادم. يرجى التحقق من اتصال الخادم وإعادة المحاولة.',
+        };
+      }
+
+      if (!data.token || !data.user) {
+        setIsLoading(false);
+        return {
+          success: false,
+          error: data.error || 'لم يتم استلام مفتاح الجلسة من الخادم بشكل صحيح.',
+        };
       }
 
       setToken(data.token);
@@ -151,7 +219,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: true };
     } catch (e: any) {
       setIsLoading(false);
-      return { success: false, error: e.message || 'حدث خطأ في الاتصال بالخادم' };
+      const msg = e?.message || '';
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Network request failed')) {
+        return {
+          success: false,
+          error: 'تعذر الاتصال بالخادم. يرجى التأكد من اتصال الإنترنت أو جاهزية الخادم.',
+        };
+      }
+      return { success: false, error: msg || 'حدث خطأ في الاتصال بالخادم أثناء تسجيل الدخول.' };
     }
   };
 
@@ -164,10 +239,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ name, email, password, role, workspaceId }),
       });
 
-      const data = await res.json();
+      const { data, isJson } = await safeParseAuthResponse(res);
+
       if (!res.ok) {
         setIsLoading(false);
-        return { success: false, error: data.error || 'فشل إنشاء الحساب' };
+        if (isJson && data?.error) {
+          return { success: false, error: data.error };
+        }
+        if (res.status === 409) {
+          return { success: false, error: 'البريد الإلكتروني مسجل مسبقاً في النظام.' };
+        }
+        if (res.status >= 500) {
+          return { success: false, error: `فشل إنشاء الحساب بسبب خطأ في الخادم (${res.status}).` };
+        }
+        return { success: false, error: `فشل إنشاء الحساب (رمز ${res.status}).` };
+      }
+
+      if (!isJson || !data || !data.token || !data.user) {
+        setIsLoading(false);
+        return {
+          success: false,
+          error: data?.error || 'استلم التطبيق استجابة غير مهيكلة عند إنشاء الحساب.',
+        };
       }
 
       setToken(data.token);
@@ -179,7 +272,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: true };
     } catch (e: any) {
       setIsLoading(false);
-      return { success: false, error: e.message || 'حدث خطأ في الاتصال بالخادم' };
+      const msg = e?.message || '';
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        return {
+          success: false,
+          error: 'تعذر الاتصال بالخادم لإنشاء الحساب. يرجى التحقق من اتصال الشبكة.',
+        };
+      }
+      return { success: false, error: msg || 'حدث خطأ في الاتصال بالخادم' };
     }
   };
 

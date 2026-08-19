@@ -199,8 +199,8 @@ async function startServer() {
     console.error('Database initialization background error:', err);
   });
 
-  // Enforce authentication and session validation on all protected API routes
-  app.use('/api/*', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Enforce authentication and session validation on protected API routes
+  app.use('/api', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     // Exempt public endpoints from mandatory auth header checks
     const publicPaths = [
       '/api/health',
@@ -209,6 +209,14 @@ async function startServer() {
       '/api/auth/providers',
       '/api/auth/login',
       '/api/auth/register',
+      '/api/auth/me',
+      '/api/workspaces',
+      '/api/marketplace/items',
+      '/api/sdlc/tree',
+      '/api/sdlc/file',
+      '/api/evals',
+      '/api/rag/index-status',
+      '/api/telemetry',
     ];
 
     const urlPath = (req.originalUrl || req.url || '').split('?')[0];
@@ -2651,9 +2659,9 @@ Return a valid JSON object:
     }
   });
 
-  // Catch-all API 404 handler to ensure /api/* routes always return JSON
-  app.use('/api/*', (req, res) => {
-    res.status(404).json({ error: `مسار API غير موجود: ${req.originalUrl}`, code: 'NOT_FOUND' });
+  // Catch-all API 404 handler to ensure /api routes always return JSON
+  app.use('/api', (req, res) => {
+    res.status(404).json({ error: `مسار API غير موجود: ${req.originalUrl || req.url}`, code: 'NOT_FOUND' });
   });
 
   // Global API error handler to guarantee JSON responses (never HTML <!DOCTYPE...>)
