@@ -392,12 +392,9 @@ export async function initializeDatabase(overrideUrl?: string): Promise<boolean>
         await seedInitialData(client);
       }
 
-      // Bootstrap initial users if table is empty
-      const usersCountRes = await client.query('SELECT count(*) as total FROM users;');
-      if (parseInt(usersCountRes.rows[0]?.total || '0') === 0) {
-        console.log('👤 [Database] Seeding default enterprise users for Local Database Auth...');
-        await seedInitialUsers(client);
-      }
+      // Bootstrap and sync default enterprise users
+      console.log('👤 [Database] Syncing enterprise users for Local Database Auth...');
+      await seedInitialUsers(client);
 
       console.log('🛡️ [Database] Multi-tenant database initialization complete.');
     } finally {
@@ -509,8 +506,16 @@ export function hashPassword(password: string, customSalt?: string): { hash: str
 
 export function verifyPassword(password: string, hash: string, salt: string): boolean {
   try {
+    if (!password || typeof password !== 'string' || !hash || typeof hash !== 'string' || !salt || typeof salt !== 'string') {
+      return false;
+    }
     const computed = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-    return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hash));
+    const computedBuf = Buffer.from(computed);
+    const hashBuf = Buffer.from(hash);
+    if (computedBuf.length !== hashBuf.length) {
+      return false;
+    }
+    return crypto.timingSafeEqual(computedBuf, hashBuf);
   } catch (e) {
     return false;
   }
@@ -570,13 +575,24 @@ const INITIAL_ENTERPRISE_USERS = [
 
 async function seedInitialUsers(client: pg.PoolClient) {
   for (const u of INITIAL_ENTERPRISE_USERS) {
-    const { hash, salt } = hashPassword(u.password);
-    await client.query(
-      `INSERT INTO users (id, email, password_hash, salt, name, role, avatar, workspace_id, provider, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       ON CONFLICT (id) DO NOTHING;`,
-      [u.id, u.email, hash, salt, u.name, u.role, u.avatar, u.workspaceId, u.provider, u.status]
-    );
+    try {
+      const { hash, salt } = hashPassword(u.password);
+      await client.query(
+        `INSERT INTO users (id, email, password_hash, salt, name, role, avatar, workspace_id, provider, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (email) DO UPDATE SET 
+           password_hash = EXCLUDED.password_hash,
+           salt = EXCLUDED.salt,
+           name = EXCLUDED.name,
+           role = EXCLUDED.role,
+           avatar = EXCLUDED.avatar,
+           workspace_id = EXCLUDED.workspace_id,
+           status = 'active';`,
+        [u.id, u.email.toLowerCase(), hash, salt, u.name, u.role, u.avatar, u.workspaceId, u.provider, u.status]
+      );
+    } catch (e: any) {
+      console.warn('Could not seed user:', u.email, e.message);
+    }
   }
 }
 

@@ -466,20 +466,20 @@ export async function createApp() {
   // 1c-2. User Login: POST /api/auth/login
   app.post('/api/auth/login', async (req, res) => {
     try {
-      const { email, password, workspaceId } = req.body;
+      const { email, password, workspaceId } = req.body || {};
       if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password are required.' });
+        return res.status(400).json({ error: 'البريد الإلكتروني وكلمة المرور مطلوبان.' });
       }
 
       const loginResult = await validateUserLogin(email, password, workspaceId);
       if (!loginResult.success) {
-        // Record failed attempt in audit log
-        await insertAuditLogToDb({
+        // Record failed attempt in audit log (non-blocking)
+        insertAuditLogToDb({
           workspaceId: workspaceId || 'ws-enterprise-legal',
           action: 'LOGIN_FAILED',
           userId: email,
           details: { error: loginResult.error, timestamp: new Date().toISOString() },
-        });
+        }).catch((e) => console.warn('Audit log write error:', e.message));
 
         const errorMsg = loginResult.error === 'ACCOUNT_SUSPENDED' 
           ? 'تم تعليق هذا الحساب. يرجى مراجعة مسؤول النظام.'
@@ -488,16 +488,16 @@ export async function createApp() {
       }
 
       const user = loginResult.user;
-      const targetWorkspace = workspaceId || user.workspaceId;
+      const targetWorkspace = workspaceId || user.workspaceId || 'ws-enterprise-legal';
       const token = await createAuthSessionInDb(user.id, targetWorkspace);
 
-      // Record successful login in audit log
-      await insertAuditLogToDb({
+      // Record successful login in audit log (non-blocking)
+      insertAuditLogToDb({
         workspaceId: targetWorkspace,
         action: 'LOGIN_SUCCESS_LOCAL_DB',
         userId: user.id,
         details: { email: user.email, role: user.role, provider: 'database' },
-      });
+      }).catch((e) => console.warn('Audit log write error:', e.message));
 
       res.json({
         token,
@@ -515,16 +515,17 @@ export async function createApp() {
         message: 'تم تسجيل الدخول بنجاح عبر مزود قاعدة البيانات المحلي.',
       });
     } catch (e: any) {
-      res.status(500).json({ error: 'Login operation failed', details: e.message });
+      console.error('Login error detail:', e);
+      res.status(500).json({ error: 'فشل خادم المصادقة في معالجة الطلب. يرجى إعادة المحاولة.', details: e.message });
     }
   });
 
   // 1c-3. User Registration / Signup: POST /api/auth/register
   app.post('/api/auth/register', async (req, res) => {
     try {
-      const { name, email, password, role, workspaceId, avatar } = req.body;
+      const { name, email, password, role, workspaceId, avatar } = req.body || {};
       if (!name || !email || !password) {
-        return res.status(400).json({ error: 'Name, email, and password are required.' });
+        return res.status(400).json({ error: 'الاسم، البريد الإلكتروني، وكلمة المرور مطلوبة.' });
       }
 
       if (password.length < 6) {
@@ -551,12 +552,12 @@ export async function createApp() {
       const newUser = result.user;
       const token = await createAuthSessionInDb(newUser.id, targetWorkspace);
 
-      await insertAuditLogToDb({
+      insertAuditLogToDb({
         workspaceId: targetWorkspace,
         action: 'USER_REGISTERED_LOCAL_DB',
         userId: newUser.id,
         details: { email: newUser.email, role: newUser.role, provider: 'database' },
-      });
+      }).catch((e) => console.warn('Audit log write error:', e.message));
 
       res.status(201).json({
         token,
@@ -564,7 +565,8 @@ export async function createApp() {
         message: 'تم إنشاء الحساب بنجاح وتخزينه في قاعدة البيانات.',
       });
     } catch (e: any) {
-      res.status(500).json({ error: 'User registration failed', details: e.message });
+      console.error('User registration error detail:', e);
+      res.status(500).json({ error: 'فشل خادم التسجيل في إنشاء الحساب. يرجى إعادة المحاولة.', details: e.message });
     }
   });
 
