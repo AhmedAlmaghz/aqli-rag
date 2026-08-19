@@ -68,6 +68,14 @@ export async function initializeDatabase(): Promise<boolean> {
   try {
     console.log(`🔌 [Database] Connecting to PostgreSQL at ${maskDatabaseUrl(connectionString)}...`);
 
+    if (pool) {
+      try {
+        await pool.end();
+      } catch (e: any) {
+        console.warn('⚠️ [Database] Error ending previous pool:', e.message);
+      }
+    }
+
     pool = new Pool({
       connectionString,
       ssl: connectionString.includes('localhost') || connectionString.includes('127.0.0.1')

@@ -1,7 +1,9 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import mammoth from 'mammoth';
@@ -56,9 +58,6 @@ import {
 import { DocumentIndexerService, chunkTextSemantically } from './server/indexer.js';
 import { classifyDocumentNlp } from './server/nlpClassifier.js';
 import { DEFAULT_MARKETPLACE_CATALOG } from './src/data/marketplaceData.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Global Exception/Rejection Handlers to prevent server crashes in production
 process.on('unhandledRejection', (reason, promise) => {
