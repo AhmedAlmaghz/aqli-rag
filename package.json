@@ -1,7 +1,7 @@
 {
   "name": "AQLI RAG",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.2",
   "author": "Ahmed Almaghz",
   "homepage": "https://aqli-rag-pro.vercel.app",
   "github": "https://github.com/AhmedAlmaghz/aqli-rag",

@@ -69,6 +69,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [dbStatus, setDbStatus] = useState<DbStatusState | null>(null);
   const [isCheckingDb, setIsCheckingDb] = useState(false);
   const [dbMessage, setDbMessage] = useState<string>('');
+  const [customDbUrl, setCustomDbUrl] = useState<string>('');
 
   // Users & Auth state
   const [usersList, setUsersList] = useState<AuthUser[]>([]);
@@ -157,11 +158,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     }
   };
 
-  const handleReconnectDb = async () => {
+  const handleReconnectDb = async (overrideUrl?: string) => {
     setIsCheckingDb(true);
     setDbMessage('');
     try {
-      const res = await fetch('/api/db/reconnect', { method: 'POST' });
+      const urlToUse = typeof overrideUrl === 'string' ? overrideUrl : customDbUrl.trim();
+      const res = await fetch('/api/db/reconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(urlToUse ? { connectionString: urlToUse } : {})
+      });
       const data = await res.json();
       if (data.status) {
         setDbStatus(data.status);
@@ -650,7 +656,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               </div>
 
               <button
-                onClick={handleReconnectDb}
+                onClick={() => handleReconnectDb()}
                 disabled={isCheckingDb}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold font-mono transition-all shadow-md shadow-cyan-600/20 disabled:opacity-50 cursor-pointer self-start sm:self-auto"
               >
@@ -766,21 +772,52 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 </div>
               </div>
 
-              {/* Right: Environment Variable Guide */}
-              <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
-                <h3 className="font-bold text-xs text-white uppercase font-mono tracking-wider flex items-center gap-2">
-                  <Key className="w-4 h-4 text-amber-400" />
-                  <span>{lang === 'ar' ? 'متغير البيئة المعتمد' : 'Environment Variable'}</span>
-                </h3>
+              {/* Right: Custom Connection String / Environment Variable Guide */}
+              <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 flex flex-col justify-between">
+                <div>
+                  <h3 className="font-bold text-xs text-white uppercase font-mono tracking-wider flex items-center gap-2">
+                    <Key className="w-4 h-4 text-amber-400" />
+                    <span>{lang === 'ar' ? 'ربط قاعدة بيانات حية (Live Database URL)' : 'Live Database URL / Vercel'}</span>
+                  </h3>
 
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  {lang === 'ar'
-                    ? 'يتم قراءة الاتصال تلقائياً عبر متغير `DATABASE_URL` أو `POSTGRES_URL` المضاف في إعدادات البيئة السحابية.'
-                    : 'Connection string automatically loaded from DATABASE_URL or POSTGRES_URL environment variables.'}
-                </p>
+                  <p className="text-xs text-slate-400 leading-relaxed mt-1">
+                    {lang === 'ar'
+                      ? 'يمكنك إدخال رابط الاتصال بقاعدة بيانات PostgreSQL (Supabase / Neon / Railway) واختباره مباشرة أو تعيينه في متغيرات Vercel:'
+                      : 'Provide a live PostgreSQL URI (Supabase, Neon, Railway) to connect immediately or configure in Vercel settings:'}
+                  </p>
+                </div>
 
-                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 font-mono text-[11px] text-amber-300">
-                  DATABASE_URL=&quot;postgresql://...&quot;
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={customDbUrl}
+                    onChange={(e) => setCustomDbUrl(e.target.value)}
+                    placeholder="postgresql://postgres:pass@ep-host.region.neon.tech/neondb?sslmode=require"
+                    className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-[11px] font-mono text-cyan-300 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleReconnectDb()}
+                      disabled={isCheckingDb}
+                      className="px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-bold font-mono transition-all disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isCheckingDb ? 'animate-spin' : ''}`} />
+                      <span>{lang === 'ar' ? 'اختبار وحفظ الاتصال' : 'Connect & Test'}</span>
+                    </button>
+                    {customDbUrl && (
+                      <button
+                        onClick={() => setCustomDbUrl('')}
+                        className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
+                      >
+                        {lang === 'ar' ? 'مسح' : 'Clear'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-800/80 text-[10px] font-mono text-slate-400">
+                  <span>Vercel Env: </span>
+                  <span className="text-amber-300">DATABASE_URL</span> | <span className="text-amber-300">POSTGRES_URL</span>
                 </div>
               </div>
 

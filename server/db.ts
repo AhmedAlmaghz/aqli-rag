@@ -34,15 +34,24 @@ let dbInfo = {
   urlMasked: '',
 };
 
-export function getDatabaseUrl(): string | undefined {
+export function getDatabaseUrl(override?: string): string | undefined {
+  if (override && typeof override === 'string' && override.trim().length > 0) {
+    return override.trim();
+  }
   return (
     process.env.POSTGRES_URL ||
     process.env.DATABASE_URL ||
+    process.env.SUPABASE_DB_URL ||
+    process.env.NEON_DATABASE_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
     process.env.PG_URI ||
     process.env.DATABASE_URI ||
     process.env.POSTGRESQL_URL ||
     process.env.DB_URL ||
-    (process.env.PGHOST ? `postgresql://${process.env.PGUSER || 'postgres'}:${process.env.PGPASSWORD || ''}@${process.env.PGHOST}:${process.env.PGPORT || 5432}/${process.env.PGDATABASE || 'postgres'}` : undefined)
+    (process.env.PGHOST
+      ? `postgresql://${encodeURIComponent(process.env.PGUSER || 'postgres')}:${encodeURIComponent(process.env.PGPASSWORD || '')}@${process.env.PGHOST}:${process.env.PGPORT || 5432}/${process.env.PGDATABASE || 'postgres'}?sslmode=require`
+      : undefined)
   );
 }
 
@@ -56,8 +65,8 @@ function maskDatabaseUrl(urlStr: string): string {
   }
 }
 
-export async function initializeDatabase(): Promise<boolean> {
-  const connectionString = getDatabaseUrl();
+export async function initializeDatabase(overrideUrl?: string): Promise<boolean> {
+  const connectionString = getDatabaseUrl(overrideUrl);
 
   if (!connectionString) {
     console.log('ℹ️ [Database] No POSTGRES_URL or DATABASE_URL found in environment. Using in-memory store with full RLS simulation.');
@@ -76,13 +85,15 @@ export async function initializeDatabase(): Promise<boolean> {
       }
     }
 
+    const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
     pool = new Pool({
       connectionString,
-      ssl: connectionString.includes('localhost') || connectionString.includes('127.0.0.1')
+      ssl: isLocal
         ? false
         : { rejectUnauthorized: false },
-      connectionTimeoutMillis: 7000,
-      max: 10,
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000,
+      max: process.env.VERCEL === '1' ? 4 : 10,
     });
 
     const client = await pool.connect();

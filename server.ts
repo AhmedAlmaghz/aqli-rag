@@ -169,7 +169,7 @@ async function searchHybridChunks(
   return filtered.slice(0, limit);
 }
 
-async function startServer() {
+export async function createApp() {
   const app = express();
   const PORT = 3000;
 
@@ -355,7 +355,8 @@ async function startServer() {
   // 1c. Reconnect / Refresh Database Connection: POST /api/db/reconnect
   app.post('/api/db/reconnect', async (req, res) => {
     try {
-      const success = await initializeDatabase();
+      const { connectionString } = req.body || {};
+      const success = await initializeDatabase(connectionString);
       const status = await getDatabaseStatus();
       res.json({
         reconnected: success,
@@ -2682,6 +2683,13 @@ Return a valid JSON object:
     next(err);
   });
 
+  return app;
+}
+
+export async function startServer() {
+  const app = await createApp();
+  const PORT = 3000;
+
   // Vite middleware in dev / static in prod
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -2700,6 +2708,12 @@ Return a valid JSON object:
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Aqli RAG Enterprise Server running on http://0.0.0.0:${PORT}`);
   });
+  return app;
 }
 
-startServer();
+// Automatically start standalone server when executed directly (Container / Node runtime)
+if (process.env.VERCEL !== '1') {
+  startServer();
+}
+
+export default createApp;
