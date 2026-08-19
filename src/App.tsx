@@ -14,6 +14,7 @@ import { SettingsPage } from './views/SettingsPage';
 import { Language, Workspace, RagMode, UserRole } from './types';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthModal } from './components/auth/AuthModal';
+import { DatabaseStatusBanner } from './components/diagnostics/DatabaseStatusBanner';
 import { 
   ShieldCheck, 
   Lock, 
@@ -232,6 +233,9 @@ function AppContent() {
             <span>{isAr ? 'English' : 'العربية'}</span>
           </button>
         </header>
+
+        {/* Real-time Database Diagnostics Alert */}
+        <DatabaseStatusBanner lang={lang} />
 
         {/* Central Gate Form Card */}
         <main className="flex-1 flex items-center justify-center px-4 py-12 max-w-lg w-full mx-auto">
@@ -482,6 +486,9 @@ function AppContent() {
 
       {/* Authentication Modal (For quick role switches inside the app) */}
       <AuthModal language={lang} />
+
+      {/* Database Diagnostic Status Banner */}
+      <DatabaseStatusBanner lang={lang} />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">

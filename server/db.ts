@@ -2,16 +2,40 @@ import pg from 'pg';
 import crypto from 'node:crypto';
 const { Pool } = pg;
 
+export type DbErrorCategory =
+  | 'NONE'
+  | 'CREDENTIAL_ERROR'
+  | 'NETWORK_ERROR'
+  | 'DATABASE_NOT_FOUND'
+  | 'SSL_ERROR'
+  | 'SCHEMA_ERROR'
+  | 'UNCONFIGURED';
+
+export interface DatabaseDiagnosticDetail {
+  category: DbErrorCategory;
+  titleAr: string;
+  titleEn: string;
+  messageAr: string;
+  messageEn: string;
+  technicalCode?: string;
+  suggestedActionAr: string;
+  suggestedActionEn: string;
+  maskedHost?: string;
+}
+
 export interface DatabaseStatus {
   connected: boolean;
   type: 'PostgreSQL' | 'In-Memory (Fallback)';
   urlMasked?: string;
+  targetEnvVar?: 'POSTGRES_URL' | 'DATABASE_URL' | 'CUSTOM' | 'NONE';
+  configuredUrlPresent: boolean;
   databaseName?: string;
   serverVersion?: string;
   pgvectorSupported: boolean;
   pgTrgmSupported: boolean;
   rlsEnforced: boolean;
   defaultAuthProvider: 'database';
+  latencyMs?: number;
   tables: {
     sourcesCount: number;
     chunksCount: number;
@@ -22,17 +46,127 @@ export interface DatabaseStatus {
   };
   lastChecked: string;
   error?: string;
+  diagnostic?: DatabaseDiagnosticDetail;
 }
 
 let pool: pg.Pool | null = null;
 let isPgConnected = false;
 let hasVectorExt = false;
 let hasTrgmExt = false;
+let lastDiagnosticResult: DatabaseDiagnosticDetail | null = null;
+let lastPingLatencyMs = 0;
 let dbInfo = {
   databaseName: '',
   serverVersion: '',
   urlMasked: '',
+  targetEnvVar: 'NONE' as 'POSTGRES_URL' | 'DATABASE_URL' | 'CUSTOM' | 'NONE',
 };
+
+export function classifyPostgreSqlError(err: any, rawUrl?: string): DatabaseDiagnosticDetail {
+  const currentUrl = rawUrl || getDatabaseUrl();
+  if (!currentUrl) {
+    return {
+      category: 'UNCONFIGURED',
+      titleAr: 'متغير الاتصال POSTGRES_URL غير مضبوط في البيئة',
+      titleEn: 'POSTGRES_URL Environment Variable Missing',
+      messageAr: 'لم يتم العثور على متغير البيئة POSTGRES_URL أو DATABASE_URL في النظام. يعمل التطبيق حالياً في وضع الذاكرة التزامني (In-Memory Fallback مع عزل المستأجرين RLS).',
+      messageEn: 'Neither POSTGRES_URL nor DATABASE_URL was found in the environment. The system is currently operating in synchronous In-Memory Fallback mode with RLS tenant isolation.',
+      technicalCode: 'ENV_POSTGRES_URL_UNDEFINED',
+      suggestedActionAr: 'أضف متغير POSTGRES_URL أو DATABASE_URL في لوحة تحكم Vercel (Project Settings -> Environment Variables) أو ملف .env.',
+      suggestedActionEn: 'Add POSTGRES_URL or DATABASE_URL in Vercel Project Settings or local .env file.',
+    };
+  }
+
+  let hostStr = 'database-host';
+  try {
+    const parsed = new URL(currentUrl);
+    hostStr = parsed.host;
+  } catch {}
+
+  const errStr = String(err?.message || err || '').toLowerCase();
+  const code = String(err?.code || '').toUpperCase();
+
+  // 1. Credential & Authentication Errors
+  const isCredential =
+    code === '28P01' || // invalid_password
+    code === '28000' || // invalid_authorization_specification
+    code === '42501' || // insufficient_privilege
+    errStr.includes('password authentication failed') ||
+    (errStr.includes('role') && errStr.includes('does not exist')) ||
+    errStr.includes('authentication failed') ||
+    errStr.includes('permission denied') ||
+    errStr.includes('access denied');
+
+  if (isCredential) {
+    return {
+      category: 'CREDENTIAL_ERROR',
+      titleAr: 'خطأ في بيانات الاعتماد والمصادقة (Credential Failure)',
+      titleEn: 'Authentication & Credential Error',
+      messageAr: 'فشل التحقق من اسم المستخدم أو كلمة المرور الخاصة بقاعدة بيانات PostgreSQL. خادم قاعدة البيانات رفض جلسة المصادقة بسبب بيانات اعتماد غير صالحة.',
+      messageEn: 'PostgreSQL authentication failed. The database server rejected the username or password specified in POSTGRES_URL.',
+      technicalCode: code || 'ERR_28P01_AUTH_FAILED',
+      maskedHost: hostStr,
+      suggestedActionAr: 'تحقق من اسم المستخدم وكلمة المرور في رابط POSTGRES_URL وتأكد من عمل URL-encode لأي رموز خاصة في كلمة المرور (مثل @ أو # أو %).',
+      suggestedActionEn: 'Verify user and password in POSTGRES_URL. Ensure special characters in password are URL-encoded.',
+    };
+  }
+
+  // 2. Database / Catalog Does Not Exist
+  const isDbNotFound =
+    code === '3D000' || // invalid_catalog_name
+    (errStr.includes('database') && errStr.includes('does not exist'));
+
+  if (isDbNotFound) {
+    return {
+      category: 'DATABASE_NOT_FOUND',
+      titleAr: 'اسم قاعدة البيانات غير موجود (Database Not Found)',
+      titleEn: 'Target Database Catalog Does Not Exist',
+      messageAr: 'تم الاتصال بالخادم بنجاح ولكن اسم قاعدة البيانات المحدد في نهاية الرابط غير موجود على السيرفر.',
+      messageEn: 'Connected to host, but the target database catalog specified in the URL does not exist.',
+      technicalCode: code || 'ERR_3D000_DB_NOT_FOUND',
+      maskedHost: hostStr,
+      suggestedActionAr: 'تأكد من إنشاء قاعدة البيانات على الخادم أو قم بتغيير اسم المسار إلى قاعدة بيانات موجودة مثل postgres أو neondb.',
+      suggestedActionEn: 'Create the database on your cluster or change the database path to an existing database (e.g. postgres or neondb).',
+    };
+  }
+
+  // 3. SSL / TLS Certificate Issues
+  const isSsl =
+    code === 'DEPTH_ZERO_SELF_SIGNED_CERT' ||
+    code === 'SELF_SIGNED_CERT_IN_CHAIN' ||
+    code === 'UNABLE_TO_GET_ISSUER_CERT' ||
+    errStr.includes('self signed certificate') ||
+    errStr.includes('ssl connection has been closed') ||
+    errStr.includes('ssl error') ||
+    errStr.includes('tlsv1');
+
+  if (isSsl) {
+    return {
+      category: 'SSL_ERROR',
+      titleAr: 'خطأ في شهادة أمان الاتصال (SSL/TLS Security Error)',
+      titleEn: 'SSL/TLS Certificate Negotiation Error',
+      messageAr: 'فشل إتمام مصافحة الأمان المشفرة SSL مع خادم قاعدة البيانات.',
+      messageEn: 'Failed to negotiate SSL/TLS certificate with the database server.',
+      technicalCode: code || 'ERR_SSL_NEGOTIATION_FAILED',
+      maskedHost: hostStr,
+      suggestedActionAr: 'أضف المعامل ?sslmode=require إلى نهاية رابط الاتصال في POSTGRES_URL.',
+      suggestedActionEn: 'Append ?sslmode=require to your POSTGRES_URL connection string.',
+    };
+  }
+
+  // 4. Network / Connectivity Issues (Default for network failures)
+  return {
+    category: 'NETWORK_ERROR',
+    titleAr: 'خطأ في الاتصال بالشبكة أو الخادم البعيد (Network / Connectivity Issue)',
+    titleEn: 'Network & Host Connectivity Issue',
+    messageAr: `تعذر الوصول إلى مضيف قاعدة البيانات عبر الشبكة: ${err?.message || 'Host unreachable / Connection timed out'}.`,
+    messageEn: `Failed to reach the database host over the network: ${err?.message || 'Connection timed out'}.`,
+    technicalCode: code || 'ERR_NETWORK_UNREACHABLE',
+    maskedHost: hostStr,
+    suggestedActionAr: 'تحقق من صحة عنوان المضيف (Host) والمنفذ (Port 5432)، وتأكد من السماح بالاتصالات الخارجية (Allow 0.0.0.0/0 في Firewall / Inbound Rules في مزود السحابة مثل Supabase أو Neon).',
+    suggestedActionEn: 'Verify the hostname and port. Ensure external IP access is permitted in your database provider firewall rules (0.0.0.0/0).',
+  };
+}
 
 export function getDatabaseUrl(override?: string): string | undefined {
   if (override && typeof override === 'string' && override.trim().length > 0) {
@@ -67,15 +201,27 @@ function maskDatabaseUrl(urlStr: string): string {
 
 export async function initializeDatabase(overrideUrl?: string): Promise<boolean> {
   const connectionString = getDatabaseUrl(overrideUrl);
+  const startPingTime = Date.now();
+
+  if (overrideUrl) {
+    dbInfo.targetEnvVar = 'CUSTOM';
+  } else if (process.env.POSTGRES_URL) {
+    dbInfo.targetEnvVar = 'POSTGRES_URL';
+  } else if (process.env.DATABASE_URL) {
+    dbInfo.targetEnvVar = 'DATABASE_URL';
+  } else {
+    dbInfo.targetEnvVar = 'NONE';
+  }
 
   if (!connectionString) {
     console.log('ℹ️ [Database] No POSTGRES_URL or DATABASE_URL found in environment. Using in-memory store with full RLS simulation.');
     isPgConnected = false;
+    lastDiagnosticResult = classifyPostgreSqlError(null, undefined);
     return false;
   }
 
   try {
-    console.log(`🔌 [Database] Connecting to PostgreSQL at ${maskDatabaseUrl(connectionString)}...`);
+    console.log(`🔌 [Database] Connecting to PostgreSQL (${dbInfo.targetEnvVar}) at ${maskDatabaseUrl(connectionString)}...`);
 
     if (pool) {
       try {
@@ -99,11 +245,22 @@ export async function initializeDatabase(overrideUrl?: string): Promise<boolean>
     const client = await pool.connect();
     try {
       const verRes = await client.query('SELECT version(), current_database() as db_name;');
+      lastPingLatencyMs = Date.now() - startPingTime;
       dbInfo.serverVersion = verRes.rows[0]?.version || 'PostgreSQL';
       dbInfo.databaseName = verRes.rows[0]?.db_name || 'defaultdb';
       dbInfo.urlMasked = maskDatabaseUrl(connectionString);
       isPgConnected = true;
-      console.log(`✅ [Database] Connected successfully to ${dbInfo.databaseName} (${dbInfo.serverVersion.split(',')[0]})`);
+      lastDiagnosticResult = {
+        category: 'NONE',
+        titleAr: 'الاتصال بقاعدة البيانات نشط ومستقر',
+        titleEn: 'Database Connection Active & Healthy',
+        messageAr: `تم الاتصال بنجاح بقاعدة البيانات ${dbInfo.databaseName} بزمن استجابة ${lastPingLatencyMs}ms.`,
+        messageEn: `Successfully connected to ${dbInfo.databaseName} with ${lastPingLatencyMs}ms latency.`,
+        suggestedActionAr: 'لا يوجد إجراء مطلوب. قاعدة البيانات تعمل بأعلى كفاءة.',
+        suggestedActionEn: 'No action required. Database is fully operational.',
+        maskedHost: dbInfo.urlMasked,
+      };
+      console.log(`✅ [Database] Connected successfully to ${dbInfo.databaseName} (${dbInfo.serverVersion.split(',')[0]}) [${lastPingLatencyMs}ms]`);
 
       // Try enabling extensions
       try {
@@ -405,6 +562,7 @@ export async function initializeDatabase(overrideUrl?: string): Promise<boolean>
   } catch (err: any) {
     console.error('❌ [Database] Connection to PostgreSQL failed:', err.message);
     isPgConnected = false;
+    lastDiagnosticResult = classifyPostgreSqlError(err, connectionString);
     return false;
   }
 }
@@ -750,16 +908,20 @@ export async function queryChunksFromDb(
 }
 
 export async function getDatabaseStatus(): Promise<DatabaseStatus> {
+  const configuredUrl = getDatabaseUrl();
   const baseStatus: DatabaseStatus = {
     connected: isPgConnected,
     type: isPgConnected ? 'PostgreSQL' : 'In-Memory (Fallback)',
-    urlMasked: dbInfo.urlMasked || undefined,
+    urlMasked: dbInfo.urlMasked || (configuredUrl ? maskDatabaseUrl(configuredUrl) : undefined),
+    targetEnvVar: dbInfo.targetEnvVar,
+    configuredUrlPresent: Boolean(configuredUrl),
     databaseName: dbInfo.databaseName || undefined,
     serverVersion: dbInfo.serverVersion ? dbInfo.serverVersion.split(',')[0] : undefined,
     pgvectorSupported: hasVectorExt,
     pgTrgmSupported: hasTrgmExt,
     rlsEnforced: true,
     defaultAuthProvider: 'database',
+    latencyMs: isPgConnected ? lastPingLatencyMs : undefined,
     tables: {
       sourcesCount: 0,
       chunksCount: 0,
@@ -769,6 +931,7 @@ export async function getDatabaseStatus(): Promise<DatabaseStatus> {
       usersCount: inMemoryUsers.length,
     },
     lastChecked: new Date().toISOString(),
+    diagnostic: lastDiagnosticResult || (!configuredUrl ? classifyPostgreSqlError(null, undefined) : undefined),
   };
 
   if (!pool || !isPgConnected) {
@@ -776,6 +939,7 @@ export async function getDatabaseStatus(): Promise<DatabaseStatus> {
   }
 
   try {
+    const pingStart = Date.now();
     const [chunksRes, sourcesRes, agentsRes, convRes, auditRes, usersRes] = await Promise.all([
       pool.query('SELECT count(*) as count FROM document_chunks'),
       pool.query('SELECT count(*) as count FROM sources'),
@@ -784,6 +948,7 @@ export async function getDatabaseStatus(): Promise<DatabaseStatus> {
       pool.query('SELECT count(*) as count FROM audit_logs'),
       pool.query('SELECT count(*) as count FROM users'),
     ]);
+    baseStatus.latencyMs = Date.now() - pingStart;
 
     baseStatus.tables = {
       chunksCount: parseInt(chunksRes.rows[0]?.count || '0'),
@@ -795,6 +960,7 @@ export async function getDatabaseStatus(): Promise<DatabaseStatus> {
     };
   } catch (err: any) {
     baseStatus.error = err.message;
+    baseStatus.diagnostic = classifyPostgreSqlError(err);
   }
 
   return baseStatus;

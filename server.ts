@@ -341,8 +341,8 @@ export async function createApp() {
     });
   });
 
-  // 1b. Real Database Status: GET /api/db/status
-  app.get('/api/db/status', async (req, res) => {
+  // 1b. Real Database Status & Diagnostics: GET /api/db/status & /db/status
+  app.get(['/api/db/status', '/db/status'], async (req, res) => {
     try {
       const status = await getDatabaseStatus();
       res.json(status);
@@ -351,8 +351,24 @@ export async function createApp() {
     }
   });
 
-  // 1c. Reconnect / Refresh Database Connection: POST /api/db/reconnect
-  app.post('/api/db/reconnect', async (req, res) => {
+  // 1b-2. Run On-Demand Database Diagnostic: POST /api/db/diagnose & /db/diagnose
+  app.post(['/api/db/diagnose', '/db/diagnose'], async (req, res) => {
+    try {
+      const { connectionString } = req.body || {};
+      const success = await initializeDatabase(connectionString);
+      const status = await getDatabaseStatus();
+      res.json({
+        success,
+        status,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: 'Database diagnostic probe failed', details: e.message });
+    }
+  });
+
+  // 1c. Reconnect / Refresh Database Connection: POST /api/db/reconnect & /db/reconnect
+  app.post(['/api/db/reconnect', '/db/reconnect'], async (req, res) => {
     try {
       const { connectionString } = req.body || {};
       const success = await initializeDatabase(connectionString);

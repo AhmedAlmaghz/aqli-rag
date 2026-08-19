@@ -321,16 +321,40 @@ export interface AuthProviderInfo {
   icon: string;
 }
 
+export type DbErrorCategory =
+  | 'NONE'
+  | 'CREDENTIAL_ERROR'
+  | 'NETWORK_ERROR'
+  | 'DATABASE_NOT_FOUND'
+  | 'SSL_ERROR'
+  | 'SCHEMA_ERROR'
+  | 'UNCONFIGURED';
+
+export interface DatabaseDiagnosticDetail {
+  category: DbErrorCategory;
+  titleAr: string;
+  titleEn: string;
+  messageAr: string;
+  messageEn: string;
+  technicalCode?: string;
+  suggestedActionAr: string;
+  suggestedActionEn: string;
+  maskedHost?: string;
+}
+
 export interface DatabaseStatus {
   connected: boolean;
   type: 'PostgreSQL' | 'In-Memory (Fallback)';
   urlMasked?: string;
+  targetEnvVar?: 'POSTGRES_URL' | 'DATABASE_URL' | 'CUSTOM' | 'NONE';
+  configuredUrlPresent: boolean;
   databaseName?: string;
   serverVersion?: string;
   pgvectorSupported: boolean;
   pgTrgmSupported: boolean;
   rlsEnforced: boolean;
   defaultAuthProvider?: 'database';
+  latencyMs?: number;
   tables: {
     sourcesCount: number;
     chunksCount: number;
@@ -341,4 +365,5 @@ export interface DatabaseStatus {
   };
   lastChecked: string;
   error?: string;
+  diagnostic?: DatabaseDiagnosticDetail;
 }
