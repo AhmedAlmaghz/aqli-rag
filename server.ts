@@ -452,8 +452,8 @@ export async function createApp() {
   // Authentication & Identity Access Management (Default: Local Database Auth)
   // --------------------------------------------------------------------------
 
-  // 1c-1. Authentication Providers Status: GET /api/auth/providers
-  app.get('/api/auth/providers', async (req, res) => {
+  // 1c-1. Authentication Providers Status: GET /api/auth/providers & /auth/providers
+  app.get(['/api/auth/providers', '/auth/providers'], async (req, res) => {
     try {
       const providersInfo = await getAuthProvidersStatus();
       res.json(providersInfo);
@@ -462,8 +462,8 @@ export async function createApp() {
     }
   });
 
-  // 1c-2. User Login: POST /api/auth/login
-  app.post('/api/auth/login', async (req, res) => {
+  // 1c-2. User Login: POST /api/auth/login & /auth/login
+  app.post(['/api/auth/login', '/auth/login'], async (req, res) => {
     try {
       const { email, password, workspaceId } = req.body || {};
       if (!email || !password) {
@@ -519,8 +519,8 @@ export async function createApp() {
     }
   });
 
-  // 1c-3. User Registration / Signup: POST /api/auth/register
-  app.post('/api/auth/register', async (req, res) => {
+  // 1c-3. User Registration / Signup: POST /api/auth/register & /auth/register
+  app.post(['/api/auth/register', '/auth/register'], async (req, res) => {
     try {
       const { name, email, password, role, workspaceId, avatar } = req.body || {};
       if (!name || !email || !password) {
@@ -569,8 +569,8 @@ export async function createApp() {
     }
   });
 
-  // 1c-4. Get Current User Session: GET /api/auth/me
-  app.get('/api/auth/me', async (req, res) => {
+  // 1c-4. Get Current User Session: GET /api/auth/me & /auth/me
+  app.get(['/api/auth/me', '/auth/me'], async (req, res) => {
     try {
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -593,8 +593,8 @@ export async function createApp() {
     }
   });
 
-  // 1c-5. User Logout: POST /api/auth/logout
-  app.post('/api/auth/logout', async (req, res) => {
+  // 1c-5. User Logout: POST /api/auth/logout & /auth/logout
+  app.post(['/api/auth/logout', '/auth/logout'], async (req, res) => {
     try {
       const authHeader = req.headers.authorization;
       if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -607,8 +607,8 @@ export async function createApp() {
     }
   });
 
-  // 1c-6. List Workspace Users: GET /api/auth/users
-  app.get('/api/auth/users', async (req, res) => {
+  // 1c-6. List Workspace Users: GET /api/auth/users & /auth/users
+  app.get(['/api/auth/users', '/auth/users'], async (req, res) => {
     try {
       const workspaceId = (req.query.workspaceId as string) || undefined;
       const users = await getUsersFromDb(workspaceId);
