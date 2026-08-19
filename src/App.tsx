@@ -181,9 +181,9 @@ function AppContent() {
     setError(null);
     setSuccessMsg(null);
     setIsSubmitting(true);
-    const success = await switchUser(presetEmail, 'password123');
-    if (!success) {
-      setError(lang === 'ar' ? 'فشل التبديل للحساب المختار' : 'Failed to switch user');
+    const res = await login(presetEmail, 'password123');
+    if (!res.success) {
+      setError(res.error || (lang === 'ar' ? 'فشل التبديل للحساب المختار' : 'Failed to switch user'));
     }
     setIsSubmitting(false);
   };

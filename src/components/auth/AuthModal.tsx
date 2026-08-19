@@ -123,11 +123,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ language }) => {
   const handleQuickSelect = async (presetEmail: string) => {
     setError(null);
     setIsSubmitting(true);
-    const success = await switchUser(presetEmail, 'password123');
-    if (success) {
+    const res = await login(presetEmail, 'password123');
+    if (res.success) {
       closeAuthModal();
     } else {
-      setError(isAr ? 'فشل التبديل للحساب المختار' : 'Failed to switch user');
+      setError(res.error || (isAr ? 'فشل التبديل للحساب المختار' : 'Failed to switch user'));
     }
     setIsSubmitting(false);
   };

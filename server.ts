@@ -219,11 +219,17 @@ async function startServer() {
       '/api/telemetry',
     ];
 
-    const urlPath = (req.originalUrl || req.url || '').split('?')[0];
+    const fullPath = req.originalUrl || (req.baseUrl ? `${req.baseUrl}${req.url}` : req.url) || '';
+    const urlPath = fullPath.split('?')[0].replace(/\/+$/, '');
     const isPublic = publicPaths.some((p) => {
-      const normalizedPath = urlPath.replace(/\/+$/, '');
       const normalizedP = p.replace(/\/+$/, '');
-      return normalizedPath === normalizedP || normalizedPath.startsWith(normalizedP + '/');
+      const pathWithoutApi = normalizedP.replace(/^\/api/, '');
+      return (
+        urlPath === normalizedP ||
+        urlPath.startsWith(normalizedP + '/') ||
+        urlPath === pathWithoutApi ||
+        urlPath.startsWith(pathWithoutApi + '/')
+      );
     });
 
     if (isPublic) {
